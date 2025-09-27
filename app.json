@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "my-smartthings-app",
+    "slug": "my-smartthings-app",
+    "scheme": "designsup",
+    "platforms": ["ios", "android", "web"],
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "web": { "bundler": "metro" }
+  }
+}
