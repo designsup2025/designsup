@@ -1,54 +1,24 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+export default function handler(req, res) {
+  const body = req.body;
+
+  console.log("[ST] full body:", body);
+
+  if (!body || !body.lifecycle) {
+    return res.status(400).json({ error: "Invalid request" });
   }
 
-  try {
-    const body = req.body || {};
-    console.log('[ST] incoming lifecycle:', body.lifecycle);
-    console.log('[ST] full body:', JSON.stringify(body));
-
-    if (body.lifecycle === 'PING' && body.pingData?.challenge) {
-      return res.status(200).json({ challenge: body.pingData.challenge });
-    }
-
-    if (body.lifecycle === 'CONFIRMATION' && body.confirmationData?.challenge) {
-      return res.status(200).json({ challenge: body.confirmationData.challenge });
-    }
-
-    if (body.lifecycle === 'CONFIGURATION') {
-      return res.status(200).json({
-        configurationData: {
-          initialize: {
-            name: 'Designsup',
-            description: 'Webhook SmartApp for aquarium controls',
-            id: 'config-1',
-            permissions: ['r:devices:*', 'x:devices:*'], // 필요한 권한만
-            firstPageId: 'page-1'
-          }
+  switch (body.lifecycle) {
+    case "CONFIRMATION":
+      return res.json({
+        confirmationResponse: {
+          confirmationKey: body.confirmationRequest.confirmationKey
         }
       });
-    }
 
-    if (body.lifecycle === 'INSTALL') {
-      return res.status(200).json({ installData: {} });
-    }
+    case "PING":
+      return res.json({ pingData: "pong" });
 
-    if (body.lifecycle === 'UPDATE') {
-      return res.status(200).json({ updateData: {} });
-    }
-
-    if (body.lifecycle === 'UNINSTALL') {
-      return res.status(200).json({ uninstallData: {} });
-    }
-
-    if (body.lifecycle === 'EVENT') {
-      return res.status(200).json({ eventData: {} });
-    }
-
-    return res.status(400).json({ error: 'Unknown lifecycle' });
-  } catch (e) {
-    console.error('[ST] handler error', e);
-    return res.status(500).json({ error: 'Internal error' });
+    default:
+      return res.status(200).json({ message: "Unhandled lifecycle" });
   }
 }
