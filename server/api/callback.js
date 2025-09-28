@@ -18,19 +18,24 @@ export default function handler(req, res) {
 
     switch (body.lifecycle) {
       case 'CONFIRMATION': {
-        const key =
-          body?.confirmationRequest?.confirmationKey ||
-          body?.confirmationData?.confirmationKey ||
-          body?.verificationRequest?.verificationKey; // 일부 문서/환경에서 이런 이름도 씁니다
+        // Webhook SmartApp: confirmationData.challenge
+        const challenge = body?.confirmationData?.challenge;
 
-        if (!key) {
-          console.warn('[ST] confirmation key not found in body:', body);
-          return res.status(400).json({ error: 'confirmationKey not found' });
+        const confirmationKey =
+          body?.confirmationRequest?.confirmationKey ||
+          body?.confirmationData?.confirmationKey;
+
+        if (challenge) {
+          console.log('[ST] Responding with challenge');
+          return res.status(200).json({ confirmationData: { challenge } });
+        }
+        if (confirmationKey) {
+          console.log('[ST] Responding with confirmationKey');
+          return res.status(200).json({ confirmationResponse: { confirmationKey } });
         }
 
-        return res.status(200).json({
-          confirmationResponse: { confirmationKey: key },
-        });
+        console.warn('[ST] confirmation not found in body');
+        return res.status(400).json({ error: 'No confirmationData.challenge or confirmationKey found' });
       }
 
       case 'PING':
