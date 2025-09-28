@@ -13,7 +13,9 @@ function findValueByKeys(obj, keys) {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method Not Allowed' });
+    }
 
     let body = req.body;
     if (typeof body === 'string') {
@@ -28,7 +30,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid request: missing lifecycle' });
     }
 
-    if (body.lifecycle === 'CONFIRMATION') {
+    const lifecycle = body.lifecycle;
+
+    if (lifecycle === 'CONFIRMATION') {
       const challenge = findValueByKeys(body, ['challenge', 'confirmationKey']);
       if (challenge) {
         console.log('[ST] challenge found:', challenge);
@@ -52,14 +56,40 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No confirmation key/url found' });
     }
 
-    if (body.lifecycle === 'PING') {
+    if (lifecycle === 'PING') {
       return res.status(200).json({ pingData: 'pong' });
     }
 
-    // 나중에 CONFIGURATION/INSTALL/UPDATE/EVENT 등 추가
-    console.log('[ST] Unhandled lifecycle:', body.lifecycle);
-    return res.status(200).json({ message: 'Unhandled lifecycle' });
+    if (lifecycle === 'INSTALL') {
+      console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}, null, 2));
+      return res.status(200).json({});
+    }
 
+    if (lifecycle === 'UPDATE') {
+      console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}, null, 2));
+      return res.status(200).json({});
+    }
+
+    if (lifecycle === 'EVENT') {
+      try {
+        const events = body.eventData?.events || [];
+        for (const evt of events) {
+          console.log('[ST] EVENT:', JSON.stringify(evt, null, 2));
+        }
+      } catch (e) {
+        console.error('[ST] EVENT parse error:', e);
+      }
+      return res.status(200).json({});
+    }
+
+    // 5) UNINSTALL (앱 제거)
+    if (lifecycle === 'UNINSTALL') {
+      console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}, null, 2));
+      return res.status(200).json({});
+    }
+
+    console.log('[ST] Unhandled lifecycle:', lifecycle);
+    return res.status(200).json({ message: `Unhandled lifecycle: ${lifecycle}` });
   } catch (err) {
     console.error('[ST] handler error:', err);
     return res.status(500).json({ error: 'Server error', detail: String(err) });
