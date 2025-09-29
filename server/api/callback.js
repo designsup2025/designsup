@@ -1,15 +1,18 @@
 export const config = {
-  runtime: 'nodejs', 
+  runtime: 'nodejs',
 };
 
-const ok = (extra = {}) => new Response(JSON.stringify(extra), {
-  status: 200,
-  headers: { 'content-type': 'application/json' }
-});
-const bad = (msg, code = 400) => new Response(JSON.stringify({ error: msg }), {
-  status: code,
-  headers: { 'content-type': 'application/json' }
-});
+const ok = (extra = {}) =>
+  new Response(JSON.stringify(extra), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
+const bad = (msg, code = 400) =>
+  new Response(JSON.stringify({ error: msg }), {
+    status: code,
+    headers: { 'content-type': 'application/json' },
+  });
 
 export default async function handler(req) {
   try {
@@ -17,16 +20,19 @@ export default async function handler(req) {
       return bad('Only POST allowed', 405);
     }
 
-    let body;
-    try {
-      body = await req.json();
-    } catch (e) {
-      console.error('[ST] invalid json body', e);
-      return bad('invalid json');
+    let body = req.body;
+    if (!body) {
+      try {
+        const text = await new Response(req.body).text();
+        body = JSON.parse(text);
+      } catch (e) {
+        console.error('[ST] invalid json body', e);
+        return bad('invalid json');
+      }
     }
 
     if (!body || !body.lifecycle) {
-      console.warn('[ST] confirmation key not found in body or lifecycle missing');
+      console.warn('[ST] lifecycle missing');
       return bad('lifecycle missing');
     }
 
