@@ -39,6 +39,55 @@ export default async function handler(req) {
     const lc = body.lifecycle;
     console.log(`[ST] lifecycle: ${lc}`);
 
+    if (lc === 'CONFIGURATION') {
+      const phase = body.configurationData?.phase;
+      console.log('[ST] CONFIGURATION phase:', phase);
+
+      if (phase === 'INITIALIZE') {
+        return ok({
+          configurationData: {
+            initialize: {
+              id: "designsup-app",
+              name: "Designsup SmartApp",
+              firstPageId: "1",
+              permissions: ["r:devices:*", "x:devices:*"], // 기기 읽기/제어 권한
+            },
+          },
+        });
+      }
+
+      if (phase === 'PAGE') {
+        return ok({
+          configurationData: {
+            page: {
+              pageId: "1",
+              name: "Setup Page",
+              nextPageId: null,
+              previousPageId: null,
+              complete: true,
+              sections: [
+                {
+                  name: "Configuration",
+                  settings: [
+                    {
+                      id: "switchDevices",
+                      name: "Select devices",
+                      description: "Choose switches to control",
+                      type: "DEVICE",
+                      required: true,
+                      multiple: true,
+                      capabilities: ["switch"],
+                      permissions: ["r", "x"],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        });
+      }
+    }
+
     if (lc === 'CONFIRMATION') {
       const url = body.confirmationData?.confirmationUrl;
       if (!url) return bad('confirmationUrl missing');
