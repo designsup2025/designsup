@@ -1,123 +1,127 @@
-module.exports.config = { runtime: 'nodejs' };
+const CONFIRMATION_URL = process.env.ST_CONFIRMATION_URL || "";
 
-async function readBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const buf = Buffer.concat(chunks);
-  return buf.toString('utf8');
-}
-
-function sendJson(res, code, obj) {
-  res.statusCode = code;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(obj ?? {}));
-}
-
-function ok(res, obj)  { sendJson(res, 200, obj); }
-function bad(res, msg, code = 400) { sendJson(res, code, { error: msg }); }
-
-module.exports = async function handler(req, res) {
-  try {
-    if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
-
-    let body;
+async function parseJsonBody(req) {
+  return await new Promise((resolve, reject) => {
     try {
-      const text = await readBody(req);
-      body = text ? JSON.parse(text) : {};
+      let data = "";
+      req.on("data", (chunk) => (data += chunk));
+      req.on("end", () => {
+        try {
+          resolve(data ? JSON.parse(data) : {});
+        } catch (e) {
+          reject(e);
+        }
+      });
     } catch (e) {
-      console.error('[ST] invalid json body', e);
-      return bad(res, 'invalid json');
+      reject(e);
+    }
+  });
+}
+
+function sendJson(res, status, obj) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(obj));
+}
+
+module.exports = async (req, res) => {
+  try {
+    const body = await parseJsonBody(req);
+    const lifecycle = body?.lifecycle;
+    console.log("[ST] lifecycle:", lifecycle);
+
+    if (lifecycle === "CONFIRMATION") {
+      if (!CONFIRMATION_URL) {
+        console.warn("[ST] confirmationUrl missing in env");
+        return sendJson(res, 400, { error: "confirmationUrl not configured" });
+      }
+      console.log("[ST] confirmationUrl => 200");
+      return sendJson(res, 200, { targetUrl: CONFIRMATION_URL });
     }
 
-    const lc = body?.lifecycle;
-    if (!lc) return bad(res, 'lifecycle missing');
+    if (lifecycle === "INSTALL" || lifecycle === "UPDATE" || lifecycle === "UNINSTALL") {
+      console.log(`[ST] ${lifecycle} received`);
+      return sendJson(res, 200, { status: "OK" });
+    }
 
-    console.log('[ST] lifecycle:', lc);
-
-    if (lc === 'CONFIGURATION') {
+    if (lifecycle === "CONFIGURATION") {
       const phase = body?.configurationData?.phase;
-      console.log('[ST] CONFIGURATION phase:', phase);
+      console.log("[ST] CONFIGURATION phase:", phase);
 
-      if (phase === 'INITIALIZE') {
-        const resp = {
+      if (phase === "INITIALIZE") {
+        return sendJson(res, 200, {
           configurationData: {
             initialize: {
-              id: 'designsup-app',
-              name: 'Designsup SmartApp',
-              description: 'Designsup automation',
-              firstPageId: 'mainPage',
-              permissions: ['r:devices:*', 'x:devices:*', 'r:scenes:*'],
-              disableCustomDisplayName: false,
-              disableRemoveApp: false,
+              name: "Designsup",
+              description: "디자인숩의 자동화 시스템 제어 어플리케이션입니다.",
+              id: "designsup-smartapp",
+              permissions: ["r:devices:*", "x:devices:*", "r:deviceprofiles:*"],
+              firstPageId: "pageMain",
             },
           },
-        };
-        console.log('[ST] INITIALIZE resp:', JSON.stringify(resp));
-        return ok(res, resp);
+        });
       }
 
-      if (phase === 'PAGE') {
-        const resp = {
+      if (phase === "PAGE") {
+        const pageId = body.configurationData.pageId || "pageMain";
+
+        return sendJson(res, 200, {
           configurationData: {
             page: {
-              pageId: 'mainPage',
-              name: 'Setup Page',
+              pageId,
+              name: "Setup Page",
               nextPageId: null,
               previousPageId: null,
               complete: true,
               sections: [
                 {
-                  name: 'Select Devices',
+                  name: "Give this app a new display name",
                   settings: [
                     {
-                      id: 'switchDevices',
-                      name: 'Choose switches',
-                      description: 'Select switches to control',
-                      type: 'DEVICE',
+                      id: "appName",
+                      name: "Name",
+                      description: "Required",
+                      type: "TEXT",
                       required: true,
+                      defaultValue: "Designsup",
+                    },
+                  ],
+                },
+                {
+                  name: "Select Devices",
+                  settings: [
+                    {
+                      id: "switches",
+                      name: "Choose switches",
+                      description: "(Optional) You can select later",
+                      type: "DEVICE",
+                      // required: false라서 기기 등록 없이 임의 테스트 가능
+                      required: false,
                       multiple: true,
-                      capabilities: ['switch'],
-                      permissions: ['r', 'x'],
+                      capabilities: ["switch"],
+                      permissions: ["r", "x"],
                     },
                   ],
                 },
               ],
             },
           },
-        };
-        console.log('[ST] PAGE resp:', JSON.stringify(resp));
-        return ok(res, resp);
+        });
       }
 
-      return ok(res, {});
+      console.warn("[ST] unsupported configuration phase:", phase);
+      return sendJson(res, 400, { error: "unsupported configuration phase" });
     }
 
-    if (lc === 'CONFIRMATION') {
-      const url = body?.confirmationData?.confirmationUrl;
-      if (!url) return bad(res, 'confirmationUrl missing');
-      try {
-        const r = await fetch(url, { method: 'GET' });
-        console.log('[ST] confirmationUrl status:', r.status);
-        return ok(res, {});
-      } catch (e) {
-        console.error('[ST] confirmation fetch failed', e);
-        return bad(res, 'confirmation fetch failed', 500);
-      }
+    if (lifecycle === "EVENT" || lifecycle === "EXECUTE") {
+      console.log(`[ST] ${lifecycle} received`);
+      return sendJson(res, 200, { status: "OK" });
     }
 
-    if (lc === 'INSTALL')    { console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}));     return ok(res, {}); }
-    if (lc === 'UPDATE')     { console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}));        return ok(res, {}); }
-    if (lc === 'UNINSTALL')  { console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}));  return ok(res, {}); }
-    if (lc === 'EVENT')      { console.log('[ST] EVENT:', JSON.stringify(body.eventData || {}));          return ok(res, {}); }
-    if (lc === 'OAUTH_CALLBACK') {
-      console.log('[ST] OAUTH_CALLBACK:', JSON.stringify(body.oauthCallbackData || {}));
-      return ok(res, {});
-    }
-
-    console.warn('[ST] unsupported lifecycle:', lc);
-    return ok(res, {});
-  } catch (e) {
-    console.error('[ST] handler error', e);
-    return bad(res, 'internal error', 500);
+    console.warn("[ST] unsupported lifecycle:", lifecycle);
+    return sendJson(res, 400, { error: "unsupported lifecycle" });
+  } catch (err) {
+    console.error("[ST] error:", err);
+    return sendJson(res, 500, { error: "internal error" });
   }
 };
