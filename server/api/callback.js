@@ -1,84 +1,126 @@
-import { NextResponse } from 'next/server';
+'use strict';
 
-export async function POST(req) {
-  let body;
+const { readJson, ok, bad } = require('./_utils');
+
+// ✅ Vercel은 'nodejs' 만 허용
+exports.config = { runtime: 'nodejs' };
+
+const {
+  ST_CLIENT_NAME,
+  ST_PUBLIC_URL,
+  ST_CLIENT_ID,      // 현재는 로깅·확장 대비로만 보유
+  ST_CLIENT_SECRET,  // 현재는 로깅·확장 대비로만 보유
+  ST_CONFIRMATION_KEY // 현재는 불필요(스마트싱스는 confirmationUrl GET으로 검증)
+} = process.env;
+
+exports.handler = async (req, res) => {
   try {
-    body = await req.json();
-  } catch (err) {
-    console.error('[ST] invalid json body', err);
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
-  }
+    if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
 
-  console.log('[ST] lifecycle:', body.lifecycle);
+    const body = await readJson(req);
+    const lc = body?.lifecycle;
+    if (!lc) return bad(res, 'lifecycle missing');
+    console.log('[ST] lifecycle:', lc);
 
-  if (body.lifecycle === 'PING') {
-    return NextResponse.json({ pingData: body.pingData });
-  }
+    if (lc === 'PING') {
+      return ok(res, { pingData: body.pingData || {} });
+    }
 
-  if (body.lifecycle === 'CONFIGURATION') {
-    const phase = body.configurationData.phase;
-    console.log('[ST] CONFIGURATION phase:', phase);
+    if (lc === 'CONFIRMATION') {
+      const url = body?.confirmationData?.confirmationUrl;
+      if (!url) return bad(res, 'confirmationUrl missing');
+      try {
+        const r = await fetch(url, { method: 'GET' });
+        console.log('[ST] confirmationUrl status:', r.status);
+        return ok(res, {}); // SmartThings는 200이면 등록 성공으로 봄
+      } catch (e) {
+        console.error('[ST] confirmation fetch failed', e);
+        return bad(res, 'confirmation fetch failed', 500);
+      }
+    }
 
-    if (phase === 'INITIALIZE') {
-      return NextResponse.json({
+    if (lc === 'CONFIGURATION') {
+      const phase = body?.configurationData?.phase;
+      console.log('[ST] CONFIGURATION phase:', phase);
+
+      if (phase === 'INITIALIZE') {
+        return ok(res, {
+          configurationData: {
+            initialize: {
+              name: ST_CLIENT_NAME || 'Designsup',
+              description:
+                `디자인숩 자동화 SmartApp${ST_PUBLIC_URL ? ` (${ST_PUBLIC_URL})` : ''}`,
+              firstPageId: 'main',
+              permissions: ['r:devices:*', 'x:devices:*', 'r:scenes:*'],
+              disableCustomDisplayName: false,
+              disableRemoveApp: false
+            }
+          }
+        });
+      }
+
+      if (phase === 'PAGE') {
+        const pageId = body?.configurationData?.pageId || 'main';
+        return ok(res, {
+          configurationData: {
+            page: {
+              pageId,
+              name: 'Setup Page',
+              nextPageId: null,
+              previousPageId: null,
+              complete: true,
+              sections: [
+                {
+                  name: 'Select Devices',
+                  settings: [
+                    {
+                      id: 'switches',
+                      name: 'Choose switches',
+                      description: 'Select switches to control',
+                      type: 'DEVICE',
+                      required: true,
+                      multiple: true,
+                      capabilities: ['switch'],
+                      permissions: ['r', 'x']
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        });
+      }
+
+      return ok(res, {
         configurationData: {
-          initialize: {
-            id: 'app',
-            name: 'Designsup',
-            description: '디자인숩 테스트 SmartApp',
-            permissions: ['r:devices:*', 'x:devices:*'],
-            firstPageId: '1',
-          },
-        },
+          page: { pageId: 'main', name: 'Setup', complete: true, sections: [] }
+        }
       });
     }
 
-    if (phase === 'PAGE') {
-      return NextResponse.json({
-        configurationData: {
-          page: {
-            pageId: '1',
-            name: 'Setup Page',
-            nextPageId: null,
-            previousPageId: null,
-            complete: true,
-            sections: [
-              {
-                name: 'Select Devices',
-                settings: [
-                  {
-                    id: 'switches',
-                    name: 'Choose switches',
-                    description: 'Select switches to control',
-                    type: 'DEVICE',
-                    required: true,
-                    multiple: true,
-                    capabilities: ['switch'],
-                    permissions: ['r', 'x'],
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      });
+    if (lc === 'INSTALL') {
+      console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}));
+      return ok(res, { installData: {} });
     }
-  }
+    if (lc === 'UPDATE') {
+      console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}));
+      return ok(res, { updateData: {} });
+    }
+    if (lc === 'UNINSTALL') {
+      console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}));
+      return ok(res, { uninstallData: {} });
+    }
+    if (lc === 'EVENT') {
+      console.log('[ST] EVENT count:', body.eventData?.events?.length || 0);
+      return ok(res, { eventData: {} });
+    }
 
-  if (body.lifecycle === 'INSTALL') {
-    console.log('[ST] INSTALL data:', body.installData);
-    return NextResponse.json({ installData: {} });
+    console.warn('[ST] unsupported lifecycle:', lc);
+    return ok(res, { status: 'ignored' });
+  } catch (e) {
+    console.error('[ST] handler error:', e);
+    return bad(res, 'internal error', 500);
   }
+};
 
-  if (body.lifecycle === 'UPDATE') {
-    console.log('[ST] UPDATE data:', body.updateData);
-    return NextResponse.json({ updateData: {} });
-  }
-
-  if (body.lifecycle === 'EVENT') {
-    console.log('[ST] EVENT data:', body.eventData);
-    return NextResponse.json({ eventData: {} });
-  }
-
-  return NextResponse.json({ error: 'Unsupported lifecycle' }, { status: 400 });
-}
+exports.default = exports.handler;
