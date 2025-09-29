@@ -1,136 +1,139 @@
-export const config = {
-  runtime: 'nodejs',
-};
+export const config = { runtime: 'nodejs' };
 
-const ok = (extra = {}) =>
-  new Response(JSON.stringify(extra), {
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const buf = Buffer.concat(chunks);
+  return buf.toString('utf8');
+}
+
+const jsonOk = (obj = {}) =>
+  new Response(JSON.stringify(obj), {
     status: 200,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json; charset=utf-8' },
   });
 
-const bad = (msg, code = 400) =>
+const jsonErr = (msg, code = 400) =>
   new Response(JSON.stringify({ error: msg }), {
     status: code,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json; charset=utf-8' },
   });
 
 export default async function handler(req) {
   try {
-    if (req.method !== 'POST') {
-      return bad('Only POST allowed', 405);
+    if (req.method !== 'POST') return jsonErr('Only POST allowed', 405);
+
+    let body;
+    try {
+      const text = await readBody(req);
+      body = text ? JSON.parse(text) : {};
+    } catch (e) {
+      console.error('[ST] invalid json body', e);
+      return jsonErr('invalid json');
     }
 
-    let body = req.body;
-    if (!body) {
-      try {
-        const text = await new Response(req.body).text();
-        body = JSON.parse(text);
-      } catch (e) {
-        console.error('[ST] invalid json body', e);
-        return bad('invalid json');
-      }
-    }
+    const lc = body?.lifecycle;
+    if (!lc) return jsonErr('lifecycle missing');
+    console.log('[ST] lifecycle:', lc);
 
-    if (!body || !body.lifecycle) {
-      console.warn('[ST] lifecycle missing');
-      return bad('lifecycle missing');
-    }
-
-    const lc = body.lifecycle;
-    console.log(`[ST] lifecycle: ${lc}`);
-
-    if (lc === 'CONFIGURATION') {
-      const phase = body.configurationData?.phase;
+      const phase = body?.configurationData?.phase;
       console.log('[ST] CONFIGURATION phase:', phase);
 
       if (phase === 'INITIALIZE') {
-        return ok({
+        const resp = {
           configurationData: {
             initialize: {
-              id: "designsup-app",
-              name: "Designsup SmartApp",
-              firstPageId: "1",
-              permissions: ["r:devices:*", "x:devices:*"], // 기기 읽기/제어 권한
+              id: 'designsup-app',                 // 임의 식별자
+              name: 'Designsup SmartApp',          // 표시 이름
+              description: 'Designsup automation', // (옵션) 설명
+              firstPageId: 'mainPage',             // 반드시 문자열
+              permissions: [                       // 프로젝트 Scopes의 부분집합
+                'r:devices:*',
+                'x:devices:*',
+                'r:scenes:*',
+              ],
+              disableCustomDisplayName: false,
+              disableRemoveApp: false,
             },
           },
-        });
+        };
+        console.log('[ST] INITIALIZE resp:', JSON.stringify(resp));
+        return jsonOk(resp);
       }
 
       if (phase === 'PAGE') {
-        return ok({
+        const resp = {
           configurationData: {
             page: {
-              pageId: "1",
-              name: "Setup Page",
+              pageId: 'mainPage',
+              name: 'Setup Page',
               nextPageId: null,
               previousPageId: null,
               complete: true,
               sections: [
                 {
-                  name: "Configuration",
+                  name: 'Select Devices',
                   settings: [
                     {
-                      id: "switchDevices",
-                      name: "Select devices",
-                      description: "Choose switches to control",
-                      type: "DEVICE",
+                      id: 'switchDevices',
+                      name: 'Choose switches',
+                      description: 'Select switches to control',
+                      type: 'DEVICE',
                       required: true,
                       multiple: true,
-                      capabilities: ["switch"],
-                      permissions: ["r", "x"],
+                      capabilities: ['switch'],
+                      permissions: ['r', 'x'],
                     },
                   ],
                 },
               ],
             },
           },
-        });
+        };
+        console.log('[ST] PAGE resp:', JSON.stringify(resp));
+        return jsonOk(resp);
       }
+
+      return jsonOk({});
     }
 
-    if (lc === 'CONFIRMATION') {
-      const url = body.confirmationData?.confirmationUrl;
-      if (!url) return bad('confirmationUrl missing');
-
+      const url = body?.confirmationData?.confirmationUrl;
+      if (!url) return jsonErr('confirmationUrl missing');
       try {
-        const res = await fetch(url, { method: 'GET' });
-        console.log('[ST] confirmationUrl status:', res.status);
-        return ok();
+        const r = await fetch(url, { method: 'GET' });
+        console.log('[ST] confirmationUrl status:', r.status);
+        return jsonOk({});
       } catch (e) {
         console.error('[ST] confirmation fetch failed', e);
-        return bad('confirmation fetch failed', 500);
+        return jsonErr('confirmation fetch failed', 500);
       }
     }
 
     if (lc === 'INSTALL') {
-      console.log('[ST] INSTALL payload:', JSON.stringify(body.installData || {}));
-      return ok({});
+      console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}));
+      return jsonOk({});
     }
-
     if (lc === 'UPDATE') {
-      console.log('[ST] UPDATE payload:', JSON.stringify(body.updateData || {}));
-      return ok({});
+      console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}));
+      return jsonOk({});
     }
-
     if (lc === 'UNINSTALL') {
-      console.log('[ST] UNINSTALL payload:', JSON.stringify(body.uninstallData || {}));
-      return ok({});
+      console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}));
+      return jsonOk({});
     }
-
     if (lc === 'EVENT') {
-      console.log('[ST] EVENT payload:', JSON.stringify(body.eventData || {}));
-      return ok({});
+      console.log('[ST] EVENT:', JSON.stringify(body.eventData || {}));
+      return jsonOk({});
     }
-
     if (lc === 'OAUTH_CALLBACK') {
-      console.log('[ST] OAUTH_CALLBACK payload:', JSON.stringify(body.oauthCallbackData || {}));
-      return ok({});
+      console.log('[ST] OAUTH_CALLBACK:', JSON.stringify(body.oauthCallbackData || {}));
+      return jsonOk({});
     }
 
     console.warn('[ST] unsupported lifecycle:', lc);
-    return ok({});
-  } catch (err) {
-    console.error('[ST] handler error', err);
-    return bad('internal error', 500);
+    return jsonOk({});
+  } catch (e) {
+    console.error('[ST] handler error', e);
+    return jsonErr('internal error', 500);
   }
 }
