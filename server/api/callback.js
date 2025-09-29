@@ -1,97 +1,81 @@
-function findValueByKeys(obj, keys) {
-  if (!obj || typeof obj !== 'object') return undefined;
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (keys.includes(k) && typeof v === 'string') return v;
-    if (v && typeof v === 'object') {
-      const found = findValueByKeys(v, keys);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
+export const config = {
+  runtime: 'nodejs', 
+};
 
-export default async function handler(req, res) {
+const ok = (extra = {}) => new Response(JSON.stringify(extra), {
+  status: 200,
+  headers: { 'content-type': 'application/json' }
+});
+const bad = (msg, code = 400) => new Response(JSON.stringify({ error: msg }), {
+  status: code,
+  headers: { 'content-type': 'application/json' }
+});
+
+export default async function handler(req) {
   try {
     if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method Not Allowed' });
+      return bad('Only POST allowed', 405);
     }
 
-    let body = req.body;
-    if (typeof body === 'string') {
-      try { body = JSON.parse(body); } catch (_) {}
+    let body;
+    try {
+      body = await req.json();
+    } catch (e) {
+      console.error('[ST] invalid json body', e);
+      return bad('invalid json');
     }
-
-    console.log('[ST] headers:', req.headers);
-    console.log('[ST] parsed body:', body);
 
     if (!body || !body.lifecycle) {
-      console.warn('[ST] missing lifecycle');
-      return res.status(400).json({ error: 'Invalid request: missing lifecycle' });
+      console.warn('[ST] confirmation key not found in body or lifecycle missing');
+      return bad('lifecycle missing');
     }
 
-    const lifecycle = body.lifecycle;
+    const lc = body.lifecycle;
+    console.log(`[ST] lifecycle: ${lc}`);
 
-    if (lifecycle === 'CONFIRMATION') {
-      const challenge = findValueByKeys(body, ['challenge', 'confirmationKey']);
-      if (challenge) {
-        console.log('[ST] challenge found:', challenge);
-        return res.status(200).json({ confirmationData: { challenge } });
-      }
+    if (lc === 'CONFIRMATION') {
+      const url = body.confirmationData?.confirmationUrl;
+      if (!url) return bad('confirmationUrl missing');
 
-      const confirmationUrl = findValueByKeys(body, ['confirmationUrl', 'confirmationURL']);
-      if (confirmationUrl) {
-        console.log('[ST] confirmationUrl found:', confirmationUrl);
-        try {
-          const r = await fetch(confirmationUrl, { method: 'GET' });
-          console.log('[ST] confirmationUrl status:', r.status);
-          return res.status(200).json({ ok: true });
-        } catch (e) {
-          console.error('[ST] confirmationUrl fetch error:', e);
-          return res.status(500).json({ error: 'confirmationUrl fetch failed' });
-        }
-      }
-
-      console.warn('[ST] confirmation not found in body ->', JSON.stringify(body));
-      return res.status(400).json({ error: 'No confirmation key/url found' });
-    }
-
-    if (lifecycle === 'PING') {
-      return res.status(200).json({ pingData: 'pong' });
-    }
-
-    if (lifecycle === 'INSTALL') {
-      console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}, null, 2));
-      return res.status(200).json({});
-    }
-
-    if (lifecycle === 'UPDATE') {
-      console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}, null, 2));
-      return res.status(200).json({});
-    }
-
-    if (lifecycle === 'EVENT') {
       try {
-        const events = body.eventData?.events || [];
-        for (const evt of events) {
-          console.log('[ST] EVENT:', JSON.stringify(evt, null, 2));
-        }
+        const res = await fetch(url, { method: 'GET' });
+        console.log('[ST] confirmationUrl status:', res.status);
+        return ok();
       } catch (e) {
-        console.error('[ST] EVENT parse error:', e);
+        console.error('[ST] confirmation fetch failed', e);
+        return bad('confirmation fetch failed', 500);
       }
-      return res.status(200).json({});
     }
 
-    // 5) UNINSTALL (앱 제거)
-    if (lifecycle === 'UNINSTALL') {
-      console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}, null, 2));
-      return res.status(200).json({});
+    if (lc === 'INSTALL') {
+      console.log('[ST] INSTALL payload:', JSON.stringify(body.installData || {}));
+      return ok({});
     }
 
-    console.log('[ST] Unhandled lifecycle:', lifecycle);
-    return res.status(200).json({ message: `Unhandled lifecycle: ${lifecycle}` });
+    if (lc === 'UPDATE') {
+      console.log('[ST] UPDATE payload:', JSON.stringify(body.updateData || {}));
+      return ok({});
+    }
+
+    if (lc === 'UNINSTALL') {
+      console.log('[ST] UNINSTALL payload:', JSON.stringify(body.uninstallData || {}));
+      return ok({});
+    }
+
+    if (lc === 'EVENT') {
+      console.log('[ST] EVENT payload:', JSON.stringify(body.eventData || {}));
+      return ok({});
+    }
+
+    if (lc === 'OAUTH_CALLBACK') {
+      console.log('[ST] OAUTH_CALLBACK payload:', JSON.stringify(body.oauthCallbackData || {}));
+      return ok({});
+    }
+
+    console.warn('[ST] unsupported lifecycle:', lc);
+    return ok({});
   } catch (err) {
-    console.error('[ST] handler error:', err);
-    return res.status(500).json({ error: 'Server error', detail: String(err) });
+    console.error('[ST] handler error', err);
+    return bad('internal error', 500);
   }
 }
