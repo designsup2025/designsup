@@ -1,111 +1,98 @@
-const { readJson, ok, bad } = require('./_utils');
-
-async function handleConfirmation(confirmationData) {
-  const url = confirmationData?.confirmationUrl;
-  if (!url) return;
-  try {
-    const r = await fetch(url, { method: 'POST' });
-    console.log('[ST] confirmationUrl status:', r.status);
-  } catch (e) {
-    console.error('[ST] confirmation error', e);
-  }
-}
-
-function initPage() {
-  return {
-    initialize: {
-      id: 'config1',
-      name: process.env.ST_CLIENT_NAME || 'Designsup',
-      firstPageId: 'page1',
-    },
-  };
-}
-
-function buildConfigPage(pageId) {
-  return {
-    page: {
-      pageId,
-      name: 'Setup Page',
-      nextPageId: null,
-      previousPageId: null,
-      complete: true,
-      sections: [
-        {
-          name: 'Select Devices',
-          settings: [
-            {
-              id: 'switches',
-              name: 'Choose switches',
-              description: 'Tap to select',
-              type: 'DEVICE',
-              required: true,
-              multiple: true,
-              capabilities: ['switch'],
-              permissions: ['r', 'x'],
-            },
-          ],
-        },
-      ],
-    },
-  };
-}
+const { bufferJson } = require('./_utils'); // <= 이미 쓰던 유틸 (본문 파싱)
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
-    return bad(res, 'Only POST allowed', 405);
+    return res.status(405).json({ error: 'Only POST allowed' });
   }
 
   let body;
   try {
-    body = await readJson(req);
+    body = await bufferJson(req);
   } catch (e) {
-    console.error('[ST] invalid json', e);
-    return bad(res, 'invalid json', 400);
+    console.error('[ST] invalid json body', e);
+    return res.status(400).json({ error: 'invalid json' });
   }
 
-  const lifecycle = (body.lifecycle || '').toUpperCase();
-  console.log('[ST] lifecycle:', lifecycle);
+  const lifecycle = body.lifecycle;
+  console.info('[ST] lifecycle:', lifecycle);
 
   try {
     switch (lifecycle) {
-      case 'CONFIRMATION':
-        await handleConfirmation(body.confirmationData);
-        return ok(res, {});
-
-      case 'CONFIGURATION': {
-        const phase = (body.configurationData?.phase || '').toUpperCase();
-        console.log('[ST] CONFIGURATION phase:', phase);
-
-        if (phase === 'INITIALIZE') return ok(res, initPage());
-        if (phase === 'PAGE') {
-          const pageId = body.configurationData?.pageId || 'page1';
-          return ok(res, buildConfigPage(pageId));
-        }
-        return ok(res, initPage());
+      case 'CONFIRMATION': {
+        const url = body.confirmationData?.confirmationUrl;
+        console.info('[ST] CONFIRMATION url:', url);
+        return res.status(200).send({});
       }
 
-      case 'INSTALL':
-        console.log('[ST] INSTALL');
-        return ok(res, {});
+      case 'CONFIGURATION': {
+        const phase = body.configurationData?.phase;
+        console.info('[ST] CONFIGURATION phase:', phase);
 
-      case 'UPDATE':
-        console.log('[ST] UPDATE');
-        return ok(res, {});
+        if (phase === 'INITIALIZE') {
+          return res.json({
+            initialize: {
+              id: 'config1',
+              name: process.env.ST_CLIENT_NAME || 'designsup',
+              firstPageId: 'page1',
+            },
+          });
+        }
 
-      case 'EVENT':
-        console.log('[ST] EVENT count:', body.events?.length || 0);
-        return ok(res, {});
+        if (phase === 'PAGE') {
+          const pageId = body.configurationData?.pageId || 'page1';
 
-      case 'UNINSTALL':
-        console.log('[ST] UNINSTALL');
-        return ok(res, {});
+          return res.json({
+            page: {
+              pageId,
+              name: 'Select devices',
+              nextPageId: null,
+              previousPageId: null,
+              complete: true,
+              sections: [
+                {
+                  name: 'Switches to control',
+                  settings: [
+                    {
+                      id: 'switches',
+                      name: 'Choose switches',
+                      description: 'Select one or more switches',
+                      type: 'DEVICE',
+                      required: true,
+                      multiple: true,
+                      capabilities: ['switch'],
+                      permissions: ['r', 'x'],
+                    },
+                  ],
+                },
+              ],
+            },
+          });
+        }
+
+        return res.status(400).json({ error: 'unsupported configuration phase' });
+      }
+
+      case 'INSTALL': {
+        console.info('[ST] INSTALL');
+        return res.status(200).send({});
+      }
+
+      case 'UPDATE': {
+        console.info('[ST] UPDATE');
+        return res.status(200).send({});
+      }
+
+      case 'UNINSTALL': {
+        console.info('[ST] UNINSTALL');
+        return res.status(200).send({});
+      }
 
       default:
         console.warn('[ST] unsupported lifecycle:', lifecycle);
-        return ok(res, {});
+        return res.status(400).json({ error: 'unsupported lifecycle' });
     }
-  } catch (e) {
-    console.error('[ST] handler error', e);
-    return bad(res, 'internal error', 500);
+  } catch (err) {
+    console.error('[ST] handler error:', err);
+    return res.status(500).json({ error: 'internal error' });
   }
 };
