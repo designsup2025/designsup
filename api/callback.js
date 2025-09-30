@@ -1,5 +1,6 @@
 'use strict';
 
+const fetch = require('node-fetch'); // fetch 사용
 const { readJson, ok, bad } = require('./_utils');
 
 exports.config = { runtime: 'nodejs' };
@@ -28,10 +29,12 @@ exports.handler = async (req, res) => {
     if (lc === 'CONFIRMATION') {
       const url = body?.confirmationData?.confirmationUrl;
       if (!url) return bad(res, 'confirmationUrl missing');
+
       try {
         const r = await fetch(url, { method: 'GET' });
         console.log('[ST] confirmationUrl status:', r.status);
-        return ok(res, {}); // SmartThings는 200이면 등록 성공으로 봄
+        // SmartThings는 200 OK만 확인하면 등록 성공으로 판단
+        return ok(res, { result: 'confirmation succeeded', status: r.status });
       } catch (e) {
         console.error('[ST] confirmation fetch failed', e);
         return bad(res, 'confirmation fetch failed', 500);
@@ -47,8 +50,7 @@ exports.handler = async (req, res) => {
           configurationData: {
             initialize: {
               name: ST_CLIENT_NAME || 'Designsup',
-              description:
-                `디자인숩 자동화 SmartApp${ST_PUBLIC_URL ? ` (${ST_PUBLIC_URL})` : ''}`,
+              description: `디자인숩 자동화 SmartApp${ST_PUBLIC_URL ? ` (${ST_PUBLIC_URL})` : ''}`,
               firstPageId: 'main',
               permissions: ['r:devices:*', 'x:devices:*', 'r:scenes:*'],
               disableCustomDisplayName: false,
@@ -101,14 +103,17 @@ exports.handler = async (req, res) => {
       console.log('[ST] INSTALL:', JSON.stringify(body.installData || {}));
       return ok(res, { installData: {} });
     }
+
     if (lc === 'UPDATE') {
       console.log('[ST] UPDATE:', JSON.stringify(body.updateData || {}));
       return ok(res, { updateData: {} });
     }
+
     if (lc === 'UNINSTALL') {
       console.log('[ST] UNINSTALL:', JSON.stringify(body.uninstallData || {}));
       return ok(res, { uninstallData: {} });
     }
+
     if (lc === 'EVENT') {
       console.log('[ST] EVENT count:', body.eventData?.events?.length || 0);
       return ok(res, { eventData: {} });

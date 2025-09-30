@@ -2,9 +2,13 @@
   "name": "designsup-server",
   "private": true,
   "version": "1.0.0",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "vercel-build": "echo \"no build\""
   },
-  "dependencies": {}
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
 }
