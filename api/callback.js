@@ -2,15 +2,14 @@
 
 const { readJson, ok, bad } = require('./_utils');
 
-// ✅ Vercel은 'nodejs' 만 허용
 exports.config = { runtime: 'nodejs' };
 
 const {
   ST_CLIENT_NAME,
   ST_PUBLIC_URL,
-  ST_CLIENT_ID,      // 현재는 로깅·확장 대비로만 보유
-  ST_CLIENT_SECRET,  // 현재는 로깅·확장 대비로만 보유
-  ST_CONFIRMATION_KEY // 현재는 불필요(스마트싱스는 confirmationUrl GET으로 검증)
+  ST_CLIENT_ID,
+  ST_CLIENT_SECRET,
+  ST_CONFIRMATION_KEY
 } = process.env;
 
 exports.handler = async (req, res) => {
