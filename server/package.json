@@ -1,7 +1,0 @@
-{
-  "name": "designsup-server",
-  "version": "1.0.0",
-  "type": "module",
-  "main": "api/index.js",
-  "private": true
-}
