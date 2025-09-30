@@ -1,6 +1,15 @@
 'use strict';
 
+const https = require('https');
 const { readJson, ok, bad } = require('./_utils');
+
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => resolve({ status: res.statusCode || 0 }));
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 module.exports = async (req, res) => {
   try {
@@ -18,9 +27,8 @@ module.exports = async (req, res) => {
     if (lc === 'CONFIRMATION') {
       const url = body?.confirmationData?.confirmationUrl;
       if (!url) return bad(res, 'confirmationUrl missing');
-
       try {
-        const r = await fetch(url, { method: 'GET' }); // 전역 fetch
+        const r = await httpGet(url);
         console.log('[ST] confirmationUrl status:', r.status);
         return ok(res, { result: 'confirmation succeeded', status: r.status });
       } catch (e) {
@@ -30,7 +38,7 @@ module.exports = async (req, res) => {
     }
 
     if (lc === 'CONFIGURATION') {
-      const phase = body?.configurationData?.phase || body?.phase; // 일부 테스트 페이로드 호환
+      const phase = body?.configurationData?.phase || body?.phase;
       console.log('[ST] CONFIGURATION phase:', phase);
 
       if (phase === 'INITIALIZE') {
@@ -38,9 +46,7 @@ module.exports = async (req, res) => {
           configurationData: {
             initialize: {
               name: process.env.ST_CLIENT_NAME || 'Designsup',
-              description: `디자인숩 자동화 SmartApp${
-                process.env.ST_PUBLIC_URL ? ` (${process.env.ST_PUBLIC_URL})` : ''
-              }`,
+              description: `디자인숩 자동화 SmartApp${process.env.ST_PUBLIC_URL ? ` (${process.env.ST_PUBLIC_URL})` : ''}`,
               firstPageId: 'main',
               permissions: ['r:devices:*', 'x:devices:*', 'r:scenes:*'],
               disableCustomDisplayName: false,
