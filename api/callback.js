@@ -1,35 +1,35 @@
-const { bufferJson } = require('./_utils'); // <= 이미 쓰던 유틸 (본문 파싱)
+'use strict';
+
+const { readJson, ok, bad } = require('./_utils');
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Only POST allowed' });
-  }
+  if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
 
   let body;
   try {
-    body = await bufferJson(req);
+    body = await readJson(req);
   } catch (e) {
     console.error('[ST] invalid json body', e);
-    return res.status(400).json({ error: 'invalid json' });
+    return bad(res, 'invalid json', 400);
   }
 
-  const lifecycle = body.lifecycle;
-  console.info('[ST] lifecycle:', lifecycle);
+  const lifecycle = (body?.lifecycle || '').toUpperCase();
+  console.log('[ST] lifecycle:', lifecycle);
 
   try {
     switch (lifecycle) {
       case 'CONFIRMATION': {
-        const url = body.confirmationData?.confirmationUrl;
-        console.info('[ST] CONFIRMATION url:', url);
-        return res.status(200).send({});
+        const url = body?.confirmationData?.confirmationUrl;
+        console.log('[ST] CONFIRMATION url:', url);
+        return ok(res, {});
       }
 
       case 'CONFIGURATION': {
-        const phase = body.configurationData?.phase;
-        console.info('[ST] CONFIGURATION phase:', phase);
+        const phase = (body?.configurationData?.phase || '').toUpperCase();
+        console.log('[ST] CONFIGURATION phase:', phase);
 
         if (phase === 'INITIALIZE') {
-          return res.json({
+          return ok(res, {
             initialize: {
               id: 'config1',
               name: process.env.ST_CLIENT_NAME || 'designsup',
@@ -39,28 +39,27 @@ module.exports = async (req, res) => {
         }
 
         if (phase === 'PAGE') {
-          const pageId = body.configurationData?.pageId || 'page1';
-
-          return res.json({
+          const pageId = body?.configurationData?.pageId || 'page1';
+          return ok(res, {
             page: {
               pageId,
-              name: 'Select devices',
+              name: 'Setup Page',
               nextPageId: null,
               previousPageId: null,
               complete: true,
               sections: [
                 {
-                  name: 'Switches to control',
+                  name: 'Select Devices',
                   settings: [
                     {
                       id: 'switches',
                       name: 'Choose switches',
-                      description: 'Select one or more switches',
+                      description: 'Tap to select',
                       type: 'DEVICE',
                       required: true,
                       multiple: true,
                       capabilities: ['switch'],
-                      permissions: ['r', 'x'],
+                      permissions: ['r','x'],
                     },
                   ],
                 },
@@ -69,30 +68,36 @@ module.exports = async (req, res) => {
           });
         }
 
-        return res.status(400).json({ error: 'unsupported configuration phase' });
+        return bad(res, 'unsupported configuration phase');
       }
 
       case 'INSTALL': {
-        console.info('[ST] INSTALL');
-        return res.status(200).send({});
+        console.log('[ST] INSTALL');
+        // TODO: body.installData.installedApp.config 에서 선택된 디바이스 ID 읽어 저장
+        return ok(res, {});
       }
 
       case 'UPDATE': {
-        console.info('[ST] UPDATE');
-        return res.status(200).send({});
+        console.log('[ST] UPDATE');
+        return ok(res, {});
+      }
+
+      case 'EVENT': {
+        console.log('[ST] EVENT count:', body?.events?.length || 0);
+        return ok(res, {});
       }
 
       case 'UNINSTALL': {
-        console.info('[ST] UNINSTALL');
-        return res.status(200).send({});
+        console.log('[ST] UNINSTALL');
+        return ok(res, {});
       }
 
       default:
         console.warn('[ST] unsupported lifecycle:', lifecycle);
-        return res.status(400).json({ error: 'unsupported lifecycle' });
+        return bad(res, 'unsupported lifecycle');
     }
-  } catch (err) {
-    console.error('[ST] handler error:', err);
-    return res.status(500).json({ error: 'internal error' });
+  } catch (e) {
+    console.error('[ST] handler error', e);
+    return bad(res, 'internal error', 500);
   }
 };
