@@ -2,28 +2,26 @@
 
 const { MongoClient, ServerApiVersion } = require('mongodb');
 
-const uri = process.env.MONGODB_URI;            // Atlas에서 받은 전체 연결 문자열
-const dbName = process.env.MONGODB_DB || 'designsup'; // 원하면 Vercel에 MONGODB_DB도 설정
+const uri = process.env.MONGODB_URI;
+const dbName = process.env.MONGODB_DB || 'designsup';
 
-if (!uri) {
-  throw new Error('MONGODB_URI env is missing');
-}
+if (!uri) throw new Error('MONGODB_URI env is missing');
 
 let client;
-let clientConn;
+let connectPromise;
 
 async function getClient() {
   if (client && client.topology && client.topology.isConnected && client.topology.isConnected()) {
     return client;
   }
-  if (!clientConn) {
+  if (!connectPromise) {
     client = new MongoClient(uri, {
       serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
       maxPoolSize: 5,
     });
-    clientConn = client.connect();
+    connectPromise = client.connect();
   }
-  await clientConn;
+  await connectPromise;
   return client;
 }
 
