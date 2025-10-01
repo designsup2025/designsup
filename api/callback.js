@@ -1,51 +1,63 @@
-'use strict';
+const fs = require('fs');
+const path = require('path');
+const { ok, error } = require('./_utils');
 
-const { readJson, ok, bad } = require('./_utils');
+const INSTALL_FILE = path.join(__dirname, 'install.json');
+
+function saveInstalledDevices(devices) {
+  try {
+    fs.writeFileSync(INSTALL_FILE, JSON.stringify({ devices }, null, 2));
+    console.log('[ST] Devices saved:', devices);
+  } catch (err) {
+    console.error('[ST] Failed to save devices:', err);
+  }
+}
+
+function loadInstalledDevices() {
+  try {
+    if (fs.existsSync(INSTALL_FILE)) {
+      const data = fs.readFileSync(INSTALL_FILE);
+      return JSON.parse(data).devices || [];
+    }
+  } catch (err) {
+    console.error('[ST] Failed to load devices:', err);
+  }
+  return [];
+}
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
-
-  let body;
   try {
-    body = await readJson(req);
-  } catch (e) {
-    console.error('[ST] invalid json body', e);
-    return bad(res, 'invalid json', 400);
-  }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    await new Promise(resolve => req.on('end', resolve));
+    body = JSON.parse(body);
 
-  const lifecycle = (body?.lifecycle || '').toUpperCase();
-  console.log('[ST] lifecycle:', lifecycle);
+    console.log('[ST] lifecycle:', body.lifecycle);
 
-  try {
-    switch (lifecycle) {
+    switch (body.lifecycle) {
       case 'CONFIRMATION': {
-        const url = body?.confirmationData?.confirmationUrl;
-        console.log('[ST] CONFIRMATION url:', url);
-        return ok(res, {});
+        return ok(res, { targetUrl: body.confirmationData.confirmationUrl });
       }
 
       case 'CONFIGURATION': {
-        const phase = (body?.configurationData?.phase || '').toUpperCase();
+        const phase = body.configurationData.phase;
         console.log('[ST] CONFIGURATION phase:', phase);
 
         if (phase === 'INITIALIZE') {
           return ok(res, {
             initialize: {
               id: 'config1',
-              name: process.env.ST_CLIENT_NAME || 'designsup',
-              firstPageId: 'page1',
-            },
+              name: 'designsup',
+              firstPageId: 'page1'
+            }
           });
         }
 
         if (phase === 'PAGE') {
-          const pageId = body?.configurationData?.pageId || 'page1';
           return ok(res, {
             page: {
-              pageId,
+              pageId: 'page1',
               name: 'Setup Page',
-              nextPageId: null,
-              previousPageId: null,
               complete: true,
               sections: [
                 {
@@ -59,45 +71,44 @@ module.exports = async (req, res) => {
                       required: true,
                       multiple: true,
                       capabilities: ['switch'],
-                      permissions: ['r','x'],
-                    },
-                  ],
-                },
-              ],
-            },
+                      permissions: ['r', 'x']
+                    }
+                  ]
+                }
+              ]
+            }
           });
         }
-
-        return bad(res, 'unsupported configuration phase');
+        break;
       }
 
       case 'INSTALL': {
         console.log('[ST] INSTALL');
-        // TODO: body.installData.installedApp.config 에서 선택된 디바이스 ID 읽어 저장
-        return ok(res, {});
-      }
-
-      case 'UPDATE': {
-        console.log('[ST] UPDATE');
-        return ok(res, {});
+        const installedApp = body.installData.installedApp;
+        const devices = installedApp?.config?.switches || [];
+        saveInstalledDevices(devices);
+        return ok(res, { status: 'installed', devices });
       }
 
       case 'EVENT': {
-        console.log('[ST] EVENT count:', body?.events?.length || 0);
-        return ok(res, {});
+        console.log('[ST] EVENT');
+        const events = body.eventData?.events || [];
+        console.log('[ST] events:', events);
+        return ok(res, { status: 'event_received' });
       }
 
       case 'UNINSTALL': {
         console.log('[ST] UNINSTALL');
-        return ok(res, {});
+        saveInstalledDevices([]); // 제거 시 기기 초기화
+        return ok(res, { status: 'uninstalled' });
       }
 
       default:
-        console.warn('[ST] unsupported lifecycle:', lifecycle);
-        return bad(res, 'unsupported lifecycle');
+        console.log('[ST] unsupported lifecycle:', body.lifecycle);
+        return error(res, 'unsupported lifecycle');
     }
-  } catch (e) {
-    console.error('[ST] handler error', e);
-    return bad(res, 'internal error', 500);
+  } catch (err) {
+    console.error('[ST] handler error:', err);
+    return error(res, err.message || 'internal error');
   }
 };

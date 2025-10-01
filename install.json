@@ -1,0 +1,19 @@
+{
+  "lifecycle": "INSTALL",
+  "installData": {
+    "installedApp": {
+      "installedAppId": "test-id",
+      "config": {
+        "switches": [
+          {
+            "valueType": "DEVICE",
+            "deviceConfig": {
+              "deviceId": "154750f6-8d11-47de-bb75-8c8f00c15904",
+              "componentId": "main"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
