@@ -1,142 +1,137 @@
-'use strict';
-
 const { getCollection } = require('./_db');
 
-function send(res, status, obj) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(obj ?? {}));
+function ok(res, body = {}) {
+  res.setHeader('Content-Type', 'application/json');
+  res.statusCode = 200;
+  res.end(JSON.stringify(body));
 }
-const ok  = (res, obj) => send(res, 200, obj);
-const bad = (res, msg, code = 400) => send(res, code, { error: msg });
+function bad(res, code = 400, msg = 'bad request') {
+  res.setHeader('Content-Type', 'application/json');
+  res.statusCode = code;
+  res.end(JSON.stringify({ error: msg }));
+}
 
-async function readJson(req) {
-  const chunks = [];
-  return await new Promise((resolve, reject) => {
-    req.on('data', c => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-    req.on('end', () => {
-      try {
-        let raw = Buffer.concat(chunks).toString('utf8');
-        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-        raw = raw.trim();
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) { reject(e); }
-    });
+module.exports = async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Content-Type', 'application/json');
+    res.statusCode = 405;
+    return res.end(JSON.stringify({ error: 'Only POST allowed' }));
+  }
+
+  let raw = '';
+  await new Promise((resolve, reject) => {
+    req.on('data', c => (raw += c));
+    req.on('end', resolve);
     req.on('error', reject);
   });
-}
-
-module.exports = async (req, res) => {
-  if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
 
   let body;
-  try { body = await readJson(req); }
-  catch (e) { console.error('[ST] invalid json body', e); return bad(res, 'invalid json', 400); }
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    return bad(res, 400, 'invalid json');
+  }
 
-  const lifecycle = (body?.lifecycle || '').toUpperCase();
-  console.log('[ST] lifecycle:', lifecycle);
+  const { lifecycle } = body || {};
+  console.info('[ST] lifecycle:', lifecycle);
 
   try {
     switch (lifecycle) {
       case 'CONFIRMATION': {
         const url = body?.confirmationData?.confirmationUrl;
-        console.log('[ST] CONFIRMATION url:', url);
-        return ok(res, { targetUrl: url || null });
+        return ok(res, url ? { targetUrl: url } : {});
       }
 
       case 'CONFIGURATION': {
-        const phase = (body?.configurationData?.phase || '').toUpperCase();
-        console.log('[ST] CONFIGURATION phase:', phase);
+        const phase = body?.configurationData?.phase;
+        console.info('[ST] CONFIGURATION phase:', phase);
 
         if (phase === 'INITIALIZE') {
           return ok(res, {
             initialize: { id: 'config1', name: 'designsup', firstPageId: 'page1' },
           });
         }
+
         if (phase === 'PAGE') {
-          const pageId = body?.configurationData?.pageId || 'page1';
           return ok(res, {
             page: {
-              pageId,
+              pageId: 'page1',
               name: 'Setup Page',
               complete: true,
-              sections: [{
-                name: 'Select Devices',
-                settings: [{
-                  id: 'switches',
-                  name: 'Choose switches',
-                  description: 'Tap to select',
-                  type: 'DEVICE',
-                  required: true,
-                  multiple: true,
-                  capabilities: ['switch'],
-                  permissions: ['r','x'],
-                }],
-              }],
+              sections: [
+                {
+                  name: 'Select Devices',
+                  settings: [
+                    {
+                      id: 'switches',
+                      name: 'Choose switches',
+                      description: 'Tap to select',
+                      type: 'DEVICE',
+                      required: true,
+                      multiple: true,
+                      capabilities: ['switch'],
+                      permissions: ['r', 'x'],
+                    },
+                  ],
+                },
+              ],
             },
           });
         }
-        return bad(res, 'unsupported configuration phase');
+
+        return ok(res, {});
       }
 
       case 'INSTALL': {
-        console.log('[ST] INSTALL');
         const installedApp = body?.installData?.installedApp;
-        const installedAppId = installedApp?.installedAppId;
-        const locationId     = installedApp?.locationId;
-        const config         = installedApp?.config || {};
-        const devices = (config.switches || [])
-          .map(v => v?.deviceConfig?.deviceId)
-          .filter(Boolean);
-
-        if (!installedAppId) return bad(res, 'missing installedAppId', 400);
-
-        const coll = await getCollection('installations');
-        const now = new Date();
-        await coll.updateOne(
-          { installedAppId },
-          {
-            $set: {
-              installedAppId,
-              locationId: locationId || null,
-              devices,
-              updatedAt: now,
-            },
-            $setOnInsert: { createdAt: now },
-          },
+        const devices = installedApp?.config?.switches || [];
+        const doc = {
+          installedAppId: installedApp?.installedAppId,
+          locationId: installedApp?.locationId || null,
+          devices,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        const col = await getCollection('installations');
+        await col.updateOne(
+          { installedAppId: doc.installedAppId },
+          { $set: doc },
           { upsert: true }
         );
-
-        return ok(res, { status: 'installed', devices: config.switches || [] });
+        return ok(res, { status: 'installed', devices });
       }
 
       case 'UPDATE': {
-        console.log('[ST] UPDATE');
+        const installedApp = body?.updateData?.installedApp || body?.installData?.installedApp;
+        const devices = installedApp?.config?.switches || [];
+        const col = await getCollection('installations');
+        await col.updateOne(
+          { installedAppId: installedApp?.installedAppId },
+          { $set: { devices, updatedAt: new Date() } },
+          { upsert: true }
+        );
         return ok(res, { status: 'updated' });
       }
 
-      case 'EVENT': {
-        const events = body?.eventData?.events || [];
-        console.log('[ST] EVENT count:', events.length);
-        return ok(res, { status: 'event-received', count: events.length });
-      }
-
       case 'UNINSTALL': {
-        console.log('[ST] UNINSTALL');
-        const installedAppId = body?.uninstallData?.installedApp?.installedAppId;
-        if (installedAppId) {
-          const coll = await getCollection('installations');
-          await coll.deleteOne({ installedAppId });
-        }
+        const installedAppId =
+          body?.uninstallData?.installedApp?.installedAppId ||
+          body?.installedApp?.installedAppId;
+        const col = await getCollection('installations');
+        if (installedAppId) await col.deleteOne({ installedAppId });
+        console.info('[ST] UNINSTALL');
         return ok(res, { status: 'uninstalled' });
       }
 
+      case 'EVENT': {
+        return ok(res, { status: 'event-received' });
+      }
+
       default:
-        console.warn('[ST] unsupported lifecycle:', lifecycle);
-        return bad(res, 'unsupported lifecycle', 400);
+        return ok(res, {});
     }
   } catch (e) {
     console.error('[ST] handler error', e);
-    return bad(res, 'internal error', 500);
+    return bad(res, 500, e.message || 'internal error');
   }
 };
