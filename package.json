@@ -9,6 +9,7 @@
     "vercel-build": "echo \"no build\""
   },
   "dependencies": {
+    "mongodb": "^6.20.0",
     "node-fetch": "^3.3.2"
   }
 }
