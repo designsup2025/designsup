@@ -1,63 +1,74 @@
-const fs = require('fs');
-const path = require('path');
-const { ok, error } = require('./_utils');
+'use strict';
 
-const INSTALL_FILE = path.join(__dirname, 'install.json');
+const { getCollection } = require('./_db');
 
-function saveInstalledDevices(devices) {
-  try {
-    fs.writeFileSync(INSTALL_FILE, JSON.stringify({ devices }, null, 2));
-    console.log('[ST] Devices saved:', devices);
-  } catch (err) {
-    console.error('[ST] Failed to save devices:', err);
-  }
+function send(res, status, obj) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(obj ?? {}));
 }
+const ok  = (res, obj) => send(res, 200, obj);
+const bad = (res, msg, code = 400) => send(res, code, { error: msg });
 
-function loadInstalledDevices() {
-  try {
-    if (fs.existsSync(INSTALL_FILE)) {
-      const data = fs.readFileSync(INSTALL_FILE);
-      return JSON.parse(data).devices || [];
-    }
-  } catch (err) {
-    console.error('[ST] Failed to load devices:', err);
-  }
-  return [];
+async function readJson(req) {
+  const chunks = [];
+  return await new Promise((resolve, reject) => {
+    req.on('data', c => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+    req.on('end', () => {
+      try {
+        let raw = Buffer.concat(chunks).toString('utf8');
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        raw = raw.trim();
+        if (!raw) return resolve({});
+        resolve(JSON.parse(raw));
+      } catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
 }
 
 module.exports = async (req, res) => {
+  if (req.method !== 'POST') return bad(res, 'Only POST allowed', 405);
+
+  let body;
+  try { body = await readJson(req); }
+  catch (e) {
+    console.error('[ST] invalid json body', e);
+    return bad(res, 'invalid json', 400);
+  }
+
+  const lifecycle = (body?.lifecycle || '').toUpperCase();
+  console.log('[ST] lifecycle:', lifecycle);
+
   try {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    await new Promise(resolve => req.on('end', resolve));
-    body = JSON.parse(body);
-
-    console.log('[ST] lifecycle:', body.lifecycle);
-
-    switch (body.lifecycle) {
+    switch (lifecycle) {
       case 'CONFIRMATION': {
-        return ok(res, { targetUrl: body.confirmationData.confirmationUrl });
+        const url = body?.confirmationData?.confirmationUrl;
+        console.log('[ST] CONFIRMATION url:', url);
+        return ok(res, {});
       }
 
       case 'CONFIGURATION': {
-        const phase = body.configurationData.phase;
+        const phase = (body?.configurationData?.phase || '').toUpperCase();
         console.log('[ST] CONFIGURATION phase:', phase);
 
         if (phase === 'INITIALIZE') {
           return ok(res, {
             initialize: {
               id: 'config1',
-              name: 'designsup',
-              firstPageId: 'page1'
-            }
+              name: process.env.ST_CLIENT_NAME || 'designsup',
+              firstPageId: 'page1',
+            },
           });
         }
-
         if (phase === 'PAGE') {
+          const pageId = body?.configurationData?.pageId || 'page1';
           return ok(res, {
             page: {
-              pageId: 'page1',
+              pageId,
               name: 'Setup Page',
+              nextPageId: null,
+              previousPageId: null,
               complete: true,
               sections: [
                 {
@@ -71,44 +82,79 @@ module.exports = async (req, res) => {
                       required: true,
                       multiple: true,
                       capabilities: ['switch'],
-                      permissions: ['r', 'x']
-                    }
-                  ]
-                }
-              ]
-            }
+                      permissions: ['r','x'],
+                    },
+                  ],
+                },
+              ],
+            },
           });
         }
-        break;
+        return bad(res, 'unsupported configuration phase');
       }
 
       case 'INSTALL': {
         console.log('[ST] INSTALL');
-        const installedApp = body.installData.installedApp;
-        const devices = installedApp?.config?.switches || [];
-        saveInstalledDevices(devices);
-        return ok(res, { status: 'installed', devices });
+        const installedApp = body?.installData?.installedApp;
+        const installedAppId = installedApp?.installedAppId;
+        const locationId     = installedApp?.locationId;
+        const config         = installedApp?.config || {};
+        const devices = (config.switches || [])
+          .map(v => v?.deviceConfig?.deviceId)
+          .filter(Boolean);
+
+        if (!installedAppId) return bad(res, 'missing installedAppId', 400);
+
+        const coll = await getCollection();
+        const now = new Date();
+        await coll.updateOne(
+          { installedAppId },
+          {
+            $set: {
+              installedAppId,
+              locationId,
+              devices,          // [deviceId, ...]
+              updatedAt: now,
+            },
+            $setOnInsert: {
+              createdAt: now,
+            },
+          },
+          { upsert: true },
+        );
+
+        console.log('[ST] saved to DB', { installedAppId, locationId, devicesCount: devices.length });
+        return ok(res, { ok: true });
+      }
+
+      case 'UPDATE': {
+        console.log('[ST] UPDATE');
+        return ok(res, { ok: true });
       }
 
       case 'EVENT': {
-        console.log('[ST] EVENT');
-        const events = body.eventData?.events || [];
-        console.log('[ST] events:', events);
-        return ok(res, { status: 'event_received' });
+        const events = body?.eventData?.events || [];
+        console.log('[ST] EVENT count:', events.length);
+        return ok(res, { ok: true });
       }
 
       case 'UNINSTALL': {
         console.log('[ST] UNINSTALL');
-        saveInstalledDevices([]); // 제거 시 기기 초기화
-        return ok(res, { status: 'uninstalled' });
+        const installedAppId = body?.uninstallData?.installedApp?.installedAppId;
+        if (installedAppId) {
+          const coll = await getCollection();
+          await coll.deleteOne({ installedAppId });
+          console.log('[ST] removed from DB', installedAppId);
+        }
+        return ok(res, { ok: true });
       }
 
       default:
-        console.log('[ST] unsupported lifecycle:', body.lifecycle);
-        return error(res, 'unsupported lifecycle');
+        console.warn('[ST] unsupported lifecycle:', lifecycle);
+        return bad(res, 'unsupported lifecycle');
     }
-  } catch (err) {
-    console.error('[ST] handler error:', err);
-    return error(res, err.message || 'internal error');
+  } catch (e) {
+    console.error('[ST] handler error', e);
+    return bad(res, 'internal error', 500);
   }
 };
