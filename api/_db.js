@@ -1,32 +1,31 @@
 const { MongoClient } = require('mongodb');
 
 const uri = process.env.MONGODB_URI;
-if (!uri) throw new Error('MONGODB_URI env is missing');
+const dbName = process.env.MONGODB_DB || 'designsup';
 
-let client;
-let clientPromise;
+if (!uri) {
+  console.warn('[DB] MONGODB_URI not set. DB calls will fail.');
+}
 
-async function connect() {
-  if (client && client.topology && client.topology.isConnected && client.topology.isConnected()) {
-    return client;
-  }
-  if (!clientPromise) {
-    client = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 10000,
+let _client;
+let _db;
+
+async function getDb() {
+  if (!_client) {
+    _client = new MongoClient(uri, {
+      tls: true,
+      serverSelectionTimeoutMS: 8000,
     });
-    clientPromise = client.connect();
+    await _client.connect();
+    _db = _client.db(dbName);
+    console.info('[DB] connected');
   }
-  return clientPromise;
+  return _db;
 }
 
-async function getDb(dbName) {
-  const c = await connect();
-  return dbName ? c.db(dbName) : c.db();
-}
-
-async function getCollection(name, dbName) {
-  const db = await getDb(dbName);
+async function getCollection(name) {
+  const db = await getDb();
   return db.collection(name);
 }
 
-module.exports = { connect, getDb, getCollection };
+module.exports = { getDb, getCollection };

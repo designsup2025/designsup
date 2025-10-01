@@ -117,9 +117,15 @@ module.exports = async function handler(req, res) {
         const installedAppId =
           body?.uninstallData?.installedApp?.installedAppId ||
           body?.installedApp?.installedAppId;
-        const col = await getCollection('installations');
-        if (installedAppId) await col.deleteOne({ installedAppId });
-        console.info('[ST] UNINSTALL');
+        try {
+          if (installedAppId) {
+            const col = await getCollection('installations');
+            await col.deleteOne({ installedAppId });
+          }
+          console.info('[ST] UNINSTALL');
+        } catch (e) {
+          console.warn('[ST] UNINSTALL DB cleanup failed:', e.message);
+        }
         return ok(res, { status: 'uninstalled' });
       }
 
