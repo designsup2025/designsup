@@ -1,31 +1,34 @@
-'use strict';
+const { URL } = require('url');
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
-    let raw = '';
-    req.on('data', (chunk) => (raw += chunk));
+    const ct = (req.headers['content-type'] || '').toLowerCase();
+    if (!ct.startsWith('application/json')) {
+      return reject(new Error(`Unsupported content-type: ${ct}`));
+    }
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
-      if (!raw) return resolve({});
-      try { resolve(JSON.parse(raw)); }
-      catch (e) { reject(new Error('invalid json')); }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      try {
+        const obj = raw ? JSON.parse(raw) : {};
+        resolve({ obj, raw });
+      } catch (e) {
+        e.raw = raw;
+        reject(e);
+      }
     });
     req.on('error', reject);
   });
 }
 
-function send(res, status, obj) {
-  const body = JSON.stringify(obj || {});
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(body);
+function sendJSON(res, obj, code = 200) {
+  const json = JSON.stringify(obj);
+  res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(json) });
+  res.end(json);
 }
 
-function log(...args) {
-  console.log(...args);
-}
-
-function configurationInitialize() {
+function initializePayload() {
   return {
     initialize: {
       id: 'config1',
@@ -35,7 +38,7 @@ function configurationInitialize() {
   };
 }
 
-function configurationPage() {
+function pagePayload() {
   return {
     page: {
       pageId: 'page1',
@@ -64,66 +67,58 @@ function configurationPage() {
 
 module.exports = async (req, res) => {
   try {
-    const body = await readJson(req);
+    if (req.method !== 'POST') {
+      return sendJSON(res, { error: 'Only POST allowed' }, 405);
+    }
+
+    const { obj: body, raw } = await readJson(req).catch((err) => {
+      console.error('[ST] JSON parse error:', err.message, 'raw preview:', String(err.raw || '').slice(0, 200));
+      throw new Error('invalid json');
+    });
 
     const lifecycle = body.lifecycle;
-    log('[ST] lifecycle:', lifecycle);
+    console.log('[ST] lifecycle:', lifecycle);
 
     if (lifecycle === 'CONFIRMATION') {
       const url = body?.confirmationData?.confirmationUrl;
-      return send(res, 200, { targetUrl: url || 'OK' });
+      console.log('[ST] confirmation url:', url);
+      return sendJSON(res, { targetUrl: url || '' });
     }
 
     if (lifecycle === 'CONFIGURATION') {
-      const phase = body?.configurationData?.phase;
-      log('[ST] CONFIGURATION phase:', phase);
+      const phase = body?.configurationData?.phase || 'INITIALIZE';
+      console.log('[ST] CONFIGURATION phase:', phase);
 
       if (phase === 'INITIALIZE') {
-        return send(res, 200, configurationInitialize());
+        return sendJSON(res, initializePayload());
       }
 
       if (phase === 'PAGE') {
-        const pageId = body?.configurationData?.pageId;
-        if (pageId === 'page1') {
-          return send(res, 200, configurationPage());
-        }
-        return send(res, 200, configurationPage()); // 기본 동일 페이지 반환
+        const pageId = body?.configurationData?.pageId || 'page1';
+        console.log('[ST] CONFIGURATION pageId:', pageId);
+        return sendJSON(res, pagePayload());
       }
 
-      return send(res, 200, configurationInitialize());
+      return sendJSON(res, initializePayload());
     }
 
     if (lifecycle === 'INSTALL') {
       const installedAppId = body?.installData?.installedApp?.installedAppId;
-      const selected = body?.installData?.installedApp?.config?.switches || [];
-      log('[ST] INSTALL installedAppId:', installedAppId, 'devices:', selected.length);
-
-      return send(res, 200, { status: 'installed', devices: selected });
-    }
-
-    if (lifecycle === 'UPDATE') {
-      const installedAppId = body?.updateData?.installedApp?.installedAppId;
-      const selected = body?.updateData?.installedApp?.config?.switches || [];
-      log('[ST] UPDATE installedAppId:', installedAppId, 'devices:', selected.length);
-      return send(res, 200, { status: 'updated', devices: selected });
+      const devices = body?.installData?.installedApp?.config?.switches || [];
+      console.log('[ST] INSTALL', installedAppId, 'devices:', devices.length);
+      return sendJSON(res, { status: 'installed', devices });
     }
 
     if (lifecycle === 'UNINSTALL') {
       const installedAppId = body?.uninstallData?.installedApp?.installedAppId;
-      log('[ST] UNINSTALL', installedAppId);
-      return send(res, 200, { status: 'uninstalled' });
+      console.log('[ST] UNINSTALL', installedAppId);
+      return sendJSON(res, { status: 'uninstalled' });
     }
 
-    if (lifecycle === 'EVENT') {
-      log('[ST] EVENT', JSON.stringify(body?.eventData || {}));
-      return send(res, 200, { status: 'event-ack' });
-    }
-
-    log('[ST] unknown lifecycle:', lifecycle);
-    return send(res, 400, { error: 'unknown lifecycle' });
-
+    console.warn('[ST] unknown lifecycle, raw:', raw?.slice(0, 200));
+    return sendJSON(res, { error: 'unknown lifecycle' }, 400);
   } catch (e) {
-    console.error('[ST] handler error', e);
-    return send(res, 500, { error: e.message || 'internal error' });
+    console.error('[ST] handler error:', e);
+    return sendJSON(res, { error: e.message || 'internal error' }, 500);
   }
 };
